@@ -6,16 +6,36 @@ export function UserMenu() {
   const { user, setShowAuthModal, logout } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const signOutBtnRef = useRef<HTMLButtonElement>(null);
 
+  // Close dropdown when clicking outside
   useEffect(() => {
-    function handleClick(e: MouseEvent) {
+    function handleClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setIsOpen(false);
       }
     }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
+
+  // Handle sign out with native event listener for reliability
+  useEffect(() => {
+    const btn = signOutBtnRef.current;
+    if (!btn) return;
+
+    const handleSignOut = async (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsOpen(false);
+      await logout();
+    };
+
+    btn.addEventListener("click", handleSignOut);
+    return () => btn.removeEventListener("click", handleSignOut);
+  }, [logout, isOpen]);
 
   if (!user) {
     return (
@@ -120,24 +140,19 @@ export function UserMenu() {
           {/* Sync status */}
           <div className="px-4 py-2.5 border-b border-white/5">
             <div className="flex items-center gap-2 text-green-400/80">
-              <div className="relative">
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-                  <polyline points="22 4 12 14.01 9 11.01" />
-                </svg>
-              </div>
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
               <span className="text-[11px] font-medium">Favorites synced to cloud</span>
             </div>
           </div>
 
-          {/* Actions */}
+          {/* Sign Out Button - uses ref for native event listener */}
           <div className="p-1.5">
             <button
-              onClick={() => {
-                setIsOpen(false);
-                logout();
-              }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-all text-sm"
+              ref={signOutBtnRef}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-all text-sm cursor-pointer select-none"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />

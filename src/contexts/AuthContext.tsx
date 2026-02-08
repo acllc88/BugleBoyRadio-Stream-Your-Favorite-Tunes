@@ -9,6 +9,8 @@ import {
 import {
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
@@ -107,6 +109,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user]
   );
 
+  // Check for redirect result on page load (for signInWithRedirect fallback)
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result?.user) {
+          setShowAuthModal(false);
+          await mergeFavoritesOnLogin(result.user.uid);
+        }
+      })
+      .catch((err) => {
+        console.error("Redirect result error:", err);
+      });
+  }, []);
+
   // Auth state listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -129,13 +145,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithGoogle = async () => {
     try {
+      // First try popup
       const result = await signInWithPopup(auth, googleProvider);
       setShowAuthModal(false);
-      // Merge localStorage favorites into Firestore
       await mergeFavoritesOnLogin(result.user.uid);
-    } catch (err) {
-      console.error("Google sign-in error:", err);
-      throw err;
+    } catch (err: unknown) {
+      const firebaseError = err as { code?: string };
+      console.error("Google sign-in popup error:", firebaseError);
+
+      // If popup was blocked or failed, try redirect
+      if (
+        firebaseError.code === "auth/popup-blocked" ||
+        firebaseError.code === "auth/popup-closed-by-user" ||
+        firebaseError.code === "auth/cancelled-popup-request" ||
+        firebaseError.code === "auth/internal-error"
+      ) {
+        try {
+          // Fallback to redirect
+          await signInWithRedirect(auth, googleProvider);
+          // Page will reload after redirect, result handled in useEffect above
+        } catch (redirectErr) {
+          console.error("Google sign-in redirect error:", redirectErr);
+          throw redirectErr;
+        }
+      } else {
+        throw err;
+      }
     }
   };
 
@@ -199,7 +234,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     try {
       await firebaseSignOut(auth);
+      setUser(null);
       setFavorites(new Set());
+      localStorage.removeItem("bugleboy-favorites");
     } catch (err) {
       console.error("Logout error:", err);
     }
