@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Generate OG Image for Bugle Boy Radio</title>
+<style>body{margin:0;display:flex;flex-direction:column;align-items:center;background:#1e293b;color:white;font-family:Arial;padding:20px}
+canvas{border:2px solid #f59e0b;margin:20px}
+button{background:#f59e0b;color:black;padding:12px 24px;border:none;border-radius:8px;font-size:18px;font-weight:bold;cursor:pointer;margin:10px}
+button:hover{background:#fbbf24}
+p{color:#94a3b8;max-width:600px;text-align:center;line-height:1.6}</style>
+</head>
+<body>
+<h1>📻 OG Image Generator</h1>
+<p>Click the button below to download a 1200x630 OG image for Bugle Boy Radio. Then upload it to ImgBB at full size and update the og:image meta tag.</p>
+<canvas id="c" width="1200" height="630"></canvas>
+<button onclick="download()">⬇️ Download OG Image (1200x630)</button>
+<p id="status"></p>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// Background gradient
+const bg = ctx.createLinearGradient(0,0,1200,630);
+bg.addColorStop(0,'#0f172a');
+bg.addColorStop(0.5,'#1e293b');
+bg.addColorStop(1,'#0f172a');
+ctx.fillStyle = bg;
+ctx.fillRect(0,0,1200,630);
+
+// Decorative circles
+ctx.beginPath();ctx.arc(200,500,300,0,Math.PI*2);ctx.fillStyle='rgba(245,158,11,0.05)';ctx.fill();
+ctx.beginPath();ctx.arc(1000,130,250,0,Math.PI*2);ctx.fillStyle='rgba(59,130,246,0.05)';ctx.fill();
+ctx.beginPath();ctx.arc(600,315,200,0,Math.PI*2);ctx.fillStyle='rgba(245,158,11,0.03)';ctx.fill();
+
+// Top gold line
+const gold = ctx.createLinearGradient(0,0,1200,0);
+gold.addColorStop(0,'#f59e0b');gold.addColorStop(0.5,'#fbbf24');gold.addColorStop(1,'#f59e0b');
+ctx.fillStyle = gold;
+ctx.fillRect(0,0,1200,5);
+ctx.fillRect(0,625,1200,5);
+
+// Radio waves
+ctx.strokeStyle = 'rgba(245,158,11,0.1)';
+ctx.lineWidth = 2;
+for(let i=0;i<3;i++){
+  ctx.beginPath();
+  const offset = i*30;
+  for(let x=100;x<=1100;x+=5){
+    const y = 280 + Math.sin((x+offset*50)*0.008)*80*(1+i*0.3);
+    x===100?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+}
+
+// Logo circle
+ctx.beginPath();ctx.arc(600,200,95,0,Math.PI*2);
+ctx.fillStyle='#1e293b';ctx.fill();
+ctx.strokeStyle='#f59e0b';ctx.lineWidth=3;ctx.stroke();
+ctx.beginPath();ctx.arc(600,200,82,0,Math.PI*2);
+ctx.fillStyle='#0f172a';ctx.fill();
+
+// Musical note icon
+ctx.font='bold 70px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+ctx.fillStyle='#f59e0b';
+ctx.fillText('📻',600,200);
+
+// Title
+ctx.font='bold 62px Arial';ctx.textAlign='center';
+const titleGrad = ctx.createLinearGradient(300,0,900,0);
+titleGrad.addColorStop(0,'#f59e0b');titleGrad.addColorStop(0.5,'#fbbf24');titleGrad.addColorStop(1,'#f59e0b');
+ctx.fillStyle=titleGrad;
+ctx.fillText('BUGLE BOY RADIO',600,355);
+
+// Subtitle
+ctx.font='24px Arial';ctx.fillStyle='#94a3b8';ctx.letterSpacing='4px';
+ctx.fillText('🇺🇸  LIVE USA RADIO STATIONS  🇺🇸',600,405);
+
+// Genre tags
+const genres = ['🎤 Hip-Hop','🎷 Jazz','🎸 Rock','🤠 Country','🎵 R&B','🎻 Classical','🎧 Electronic','🎺 Blues'];
+const tagW = 120, tagH = 32, startX = 600-(genres.length*tagW/2+genres.length*8/2), tagY = 450;
+genres.forEach((g,i)=>{
+  const x = 600 - (genres.length*(tagW+10))/2 + i*(tagW+10) + tagW/2;
+  ctx.fillStyle='#1e293b';
+  ctx.beginPath();
+  const r=16;const w=tagW;const h=tagH;const bx=x-w/2;const by=tagY;
+  ctx.moveTo(bx+r,by);ctx.lineTo(bx+w-r,by);ctx.quadraticCurveTo(bx+w,by,bx+w,by+r);
+  ctx.lineTo(bx+w,by+h-r);ctx.quadraticCurveTo(bx+w,by+h,bx+w-r,by+h);
+  ctx.lineTo(bx+r,by+h);ctx.quadraticCurveTo(bx,by+h,bx,by+h-r);
+  ctx.lineTo(bx,by+r);ctx.quadraticCurveTo(bx,by,bx+r,by);ctx.fill();
+  ctx.strokeStyle='#334155';ctx.lineWidth=1;ctx.stroke();
+  ctx.font='14px Arial';ctx.fillStyle='#cbd5e1';ctx.textAlign='center';
+  ctx.fillText(g,x,tagY+21);
+});
+
+// Badge
+ctx.beginPath();
+const bx2=480,by2=510,bw=240,bh=40,br=20;
+ctx.moveTo(bx2+br,by2);ctx.lineTo(bx2+bw-br,by2);ctx.quadraticCurveTo(bx2+bw,by2,bx2+bw,by2+br);
+ctx.lineTo(bx2+bw,by2+bh-br);ctx.quadraticCurveTo(bx2+bw,by2+bh,bx2+bw-br,by2+bh);
+ctx.lineTo(bx2+br,by2+bh);ctx.quadraticCurveTo(bx2,by2+bh,bx2,by2+bh-br);
+ctx.lineTo(bx2,by2+br);ctx.quadraticCurveTo(bx2,by2,bx2+br,by2);
+ctx.fillStyle='rgba(245,158,11,0.15)';ctx.fill();
+ctx.strokeStyle='rgba(245,158,11,0.5)';ctx.lineWidth=1.5;ctx.stroke();
+ctx.font='bold 17px Arial';ctx.fillStyle='#f59e0b';ctx.textAlign='center';
+ctx.fillText('📻  70+ FREE STATIONS',600,535);
+
+// Live dot
+ctx.beginPath();ctx.arc(1100,50,12,0,Math.PI*2);ctx.fillStyle='#ef4444';ctx.fill();
+ctx.beginPath();ctx.arc(1100,50,7,0,Math.PI*2);ctx.fillStyle='#ff6b6b';ctx.fill();
+ctx.font='bold 14px Arial';ctx.fillStyle='white';ctx.fillText('LIVE',1100,90);
+
+function download(){
+  const link=document.createElement('a');
+  link.download='bugle-boy-radio-og-image.png';
+  link.href=canvas.toDataURL('image/png');
+  link.click();
+  document.getElementById('status').textContent='✅ Downloaded! Now upload to ImgBB at full 1200x630 size and update the og:image URL in index.html';
+}
+</script>
+</body>
+</html>
