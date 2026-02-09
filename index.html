@@ -10,9 +10,9 @@
     <!-- Primary Meta Tags -->
     <title>Bugle Boy Radio - Live USA Radio Stations</title>
     <meta name="title" content="Bugle Boy Radio - Live USA Radio Stations" />
-    <meta name="description" content="Listen to 70+ live USA radio stations. Stream Hip-Hop, Jazz, Rock, Country, R&B, Classical, Electronic, Blues, and more. Free internet radio from across America." />
+    <meta name="description" content="Listen to 125+ live USA radio stations. Stream Hip-Hop, Jazz, Rock, Country, R&B, Classical, Electronic, Blues, and more. Free internet radio from across America." />
     <meta name="keywords" content="radio, USA radio, live radio, hip-hop radio, jazz radio, rock radio, country radio, R&B, classical, electronic, blues, internet radio, free radio, streaming radio, American radio stations" />
-    <meta name="author" content="Bugle Boy Radio" />
+    <meta name="author" content="ACLLC" />
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://bugleboyradio.vercel.app/" />
     <meta name="theme-color" content="#f59e0b" />
@@ -23,22 +23,22 @@
     <meta property="og:site_name" content="Bugle Boy Radio" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:title" content="Bugle Boy Radio - Live USA Radio Stations" />
-    <meta property="og:description" content="Listen to 70+ live USA radio stations. Stream Hip-Hop, Jazz, Rock, Country, R&B, Classical, Electronic, Blues, and more. Free internet radio from across America." />
+    <meta property="og:description" content="Listen to 125+ live USA radio stations. Stream Hip-Hop, Jazz, Rock, Country, R&B, Classical, Electronic, Blues, and more. Free internet radio from across America." />
     <meta property="og:image" content="https://i.ibb.co/QvVDVvJL/1770589948990-019c3f62-33cb-78b8-a0d1-143b48d493e2.png" />
     <meta property="og:image:url" content="https://i.ibb.co/QvVDVvJL/1770589948990-019c3f62-33cb-78b8-a0d1-143b48d493e2.png" />
     <meta property="og:image:secure_url" content="https://i.ibb.co/QvVDVvJL/1770589948990-019c3f62-33cb-78b8-a0d1-143b48d493e2.png" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Bugle Boy Radio - Listen to 70+ live USA radio stations for free" />
+    <meta property="og:image:alt" content="Bugle Boy Radio - Listen to 125+ live USA radio stations for free" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:url" content="https://bugleboyradio.vercel.app/" />
     <meta name="twitter:title" content="Bugle Boy Radio - Live USA Radio Stations" />
-    <meta name="twitter:description" content="Listen to 70+ live USA radio stations. Stream Hip-Hop, Jazz, Rock, Country, R&B, Classical, Electronic, Blues, and more. Free internet radio." />
+    <meta name="twitter:description" content="Listen to 125+ live USA radio stations. Stream Hip-Hop, Jazz, Rock, Country, R&B, Classical, Electronic, Blues, and more. Free internet radio." />
     <meta name="twitter:image" content="https://i.ibb.co/QvVDVvJL/1770589948990-019c3f62-33cb-78b8-a0d1-143b48d493e2.png" />
-    <meta name="twitter:image:alt" content="Bugle Boy Radio - Listen to 70+ live USA radio stations for free" />
+    <meta name="twitter:image:alt" content="Bugle Boy Radio - Listen to 125+ live USA radio stations for free" />
 
     <!-- Favicon & App Icons -->
     <link rel="icon" type="image/png" href="https://i.ibb.co/hFrqZrmB/Bugle-Boy-Radio.png" />
@@ -48,6 +48,29 @@
     <meta name="apple-mobile-web-app-title" content="Bugle Boy Radio" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="application-name" content="Bugle Boy Radio" />
+
+    <!-- Force clear all caches -->
+    <script>
+      // FORCE UNREGISTER ALL SERVICE WORKERS AND CLEAR ALL CACHES
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for(let registration of registrations) {
+            registration.unregister().then(function() {
+              console.log('🧹 Service worker unregistered');
+            });
+          }
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then(function(names) {
+          for (let name of names) {
+            caches.delete(name).then(function() {
+              console.log('🧹 Cache deleted:', name);
+            });
+          }
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
