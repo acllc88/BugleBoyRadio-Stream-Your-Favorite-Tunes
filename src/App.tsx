@@ -1,381 +1,479 @@
-import { useState, useMemo } from "react";
-import { stations, genres } from "./data/stations";
-import { useAudioPlayer } from "./hooks/useAudioPlayer";
-import { useAuth } from "./contexts/AuthContext";
-import { StationCard } from "./components/StationCard";
-import { PlayerBar } from "./components/PlayerBar";
-import { AuthModal } from "./components/AuthModal";
-import { UserMenu } from "./components/UserMenu";
-import { cn } from "./utils/cn";
+import { useState, useEffect, useRef } from 'react';
+import { useAuth } from './contexts/AuthContext';
+import { stations, type RadioStation } from './data/stations';
+import { StationCard } from './components/StationCard';
+import { PlayerBar } from './components/PlayerBar';
+import { AuthModal } from './components/AuthModal';
+import { UserMenu } from './components/UserMenu';
+import { ChatRoom } from './components/ChatRoom';
+import { collection, onSnapshot, query, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { db } from './firebase';
 
-const genreEmoji: Record<string, string> = {
-  Classical: "🎻",
-  Jazz: "🎷",
-  Rock: "🎸",
-  Country: "🤠",
-  Pop: "🎤",
-  News: "📰",
-  Eclectic: "🌈",
-  Electronic: "🎧",
-  Ambient: "🌙",
-  Lounge: "🍸",
-  Blues: "🎵",
-  World: "🌍",
-  Indie: "💜",
-  Folk: "🪕",
-  Retro: "📻",
-  Metal: "⚡",
-  Soul: "❤️‍🔥",
-  Chill: "🌿",
-  Holiday: "🎄",
-  Reggae: "🟢",
-  Experimental: "🔮",
+// Convert country code to flag emoji
+const countryCodeToFlag = (countryCode: string): string => {
+  if (!countryCode || countryCode.length !== 2) return '🌍';
+  const codePoints = countryCode
+    .toUpperCase()
+    .split('')
+    .map(char => 127397 + char.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
 };
 
-export function App() {
-  const [selectedGenre, setSelectedGenre] = useState<string>("All");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showFavorites, setShowFavorites] = useState(false);
+// Get user's country from IP
+const getUserCountry = async (): Promise<{ code: string; name: string; flag: string }> => {
+  try {
+    const response = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(5000) });
+    const data = await response.json();
+    const code = data.country_code || 'US';
+    const name = data.country_name || 'United States';
+    return { code, name, flag: countryCodeToFlag(code) };
+  } catch {
+    return { code: 'US', name: 'United States', flag: '🇺🇸' };
+  }
+};
 
-  const {
-    currentStation,
-    isPlaying,
-    isLoading,
-    volume,
-    isMuted,
-    playStation,
-    togglePlay,
-    changeVolume,
-    toggleMute,
-  } = useAudioPlayer();
+export default function App() {
+  const { user, loading, favorites, toggleFavorite, isFavorite, setShowAuthModal } = useAuth();
 
-  const { user, favorites, toggleFavorite, isFavorite, setShowAuthModal, loading } = useAuth();
+  // Theme
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem('bugleboy-theme');
+    return saved ? saved === 'dark' : true;
+  });
 
-  const filteredStations = useMemo(() => {
-    return stations.filter((station) => {
-      if (showFavorites && !favorites.has(station.id)) return false;
-      const matchesGenre =
-        selectedGenre === "All" || station.genre === selectedGenre;
-      const matchesSearch =
-        searchQuery === "" ||
-        station.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        station.genre.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        station.city.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        station.state.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        station.description.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesGenre && matchesSearch;
+  // Search & filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedGenre, setSelectedGenre] = useState('All');
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [showMore, setShowMore] = useState(60);
+
+  // Audio
+  const [playingStation, setPlayingStation] = useState<RadioStation | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [volume, setVolume] = useState(0.7);
+  const [isMuted, setIsMuted] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const prevVolumeRef = useRef(0.7);
+
+  // Chat
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [onlineCount, setOnlineCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const lastReadRef = useRef(Date.now());
+  const chatOpenRef = useRef(false);
+
+  // Save theme
+  useEffect(() => {
+    localStorage.setItem('bugleboy-theme', isDark ? 'dark' : 'light');
+  }, [isDark]);
+
+  // Online presence - push to Firebase with country
+  useEffect(() => {
+    if (!user) return;
+
+    const userDocRef = doc(db, 'onlineUsers', user.uid);
+    let userCountry = { code: 'US', name: 'United States', flag: '🇺🇸' };
+
+    const setOnline = async (country?: { code: string; name: string; flag: string }) => {
+      try {
+        const countryData = country || userCountry;
+        await setDoc(userDocRef, {
+          oduserId: user.uid,
+          userName: user.displayName || user.email?.split('@')[0] || 'User',
+          userPhoto: user.photoURL || null,
+          lastSeen: Date.now(),
+          countryCode: countryData.code,
+          countryName: countryData.name,
+          countryFlag: countryData.flag,
+        });
+        console.log('✅ User online:', user.displayName, countryData.flag);
+      } catch (e) {
+        console.error('Error setting online:', e);
+      }
+    };
+
+    // Get country then set online
+    getUserCountry().then(country => {
+      userCountry = country;
+      setOnline(country);
     });
-  }, [selectedGenre, searchQuery, showFavorites, favorites]);
 
-  const handleToggleFavorite = (stationId: string) => {
-    if (!user) {
-      setShowAuthModal(true);
-      return;
+    const heartbeat = setInterval(() => setOnline(), 10000); // Update every 10 seconds
+
+    // Cleanup stale users (older than 30 seconds)
+    const cleanupStale = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'onlineUsers'));
+        const now = Date.now();
+        const THIRTY_SECONDS = 30 * 1000;
+        let cleaned = 0;
+        for (const d of snap.docs) {
+          const ls = d.data().lastSeen;
+          if (typeof ls === 'number' && now - ls > THIRTY_SECONDS) {
+            try { 
+              await deleteDoc(doc(db, 'onlineUsers', d.id)); 
+              cleaned++;
+            } catch { /* ignore */ }
+          }
+        }
+        if (cleaned > 0) console.log('🧹 Cleaned', cleaned, 'stale users');
+      } catch { /* ignore */ }
+    };
+    cleanupStale();
+    const cleanupInterval = setInterval(cleanupStale, 15000);
+
+    const goOffline = async () => {
+      try { 
+        await deleteDoc(userDocRef); 
+        console.log('👋 User offline');
+      } catch { /* ignore */ }
+    };
+
+    window.addEventListener('beforeunload', goOffline);
+    window.addEventListener('pagehide', goOffline);
+
+    return () => {
+      clearInterval(heartbeat);
+      clearInterval(cleanupInterval);
+      window.removeEventListener('beforeunload', goOffline);
+      window.removeEventListener('pagehide', goOffline);
+      goOffline();
+    };
+  }, [user]);
+
+  // Online count listener - real-time from Firebase
+  useEffect(() => {
+    const onlineRef = collection(db, 'onlineUsers');
+    const unsub = onSnapshot(onlineRef, (snap) => {
+      const now = Date.now();
+      const THIRTY_SECONDS = 30 * 1000;
+      const activeUsers = snap.docs.filter(d => {
+        const data = d.data();
+        const lastSeen = data.lastSeen;
+        return typeof lastSeen === 'number' && (now - lastSeen) < THIRTY_SECONDS;
+      });
+      setOnlineCount(activeUsers.length);
+      console.log('👥 Online count:', activeUsers.length);
+    }, (error) => {
+      console.error('Online count error:', error);
+      setOnlineCount(0);
+    });
+    return () => unsub();
+  }, []);
+
+  // Unread messages listener
+  useEffect(() => {
+    const messagesRef = collection(db, 'chatMessages');
+    const q = query(messagesRef);
+    const unsub = onSnapshot(q, (snap) => {
+      if (chatOpenRef.current) return;
+      let count = 0;
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (data.userId !== user?.uid) {
+          const ts = data.createdAt?.toMillis?.() || 0;
+          if (ts > lastReadRef.current) count++;
+        }
+      });
+      setUnreadCount(count);
+    }, () => {});
+    return () => unsub();
+  }, [user]);
+
+  // Audio player
+  useEffect(() => {
+    if (!playingStation) return;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
     }
-    toggleFavorite(stationId);
+    const audio = new Audio();
+    audioRef.current = audio;
+    audio.volume = isMuted ? 0 : volume;
+    audio.src = playingStation.streamUrl;
+    setIsBuffering(true);
+    audio.oncanplay = () => { setIsBuffering(false); audio.play().catch(() => {}); setIsPlaying(true); };
+    audio.onplay = () => setIsPlaying(true);
+    audio.onpause = () => setIsPlaying(false);
+    audio.onerror = () => { setIsBuffering(false); setIsPlaying(false); };
+    audio.onwaiting = () => setIsBuffering(true);
+    audio.onplaying = () => setIsBuffering(false);
+    return () => { audio.pause(); audio.src = ''; };
+  }, [playingStation]);
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = isMuted ? 0 : volume;
+  }, [volume, isMuted]);
+
+  const togglePlay = () => {
+    if (!audioRef.current || !playingStation) return;
+    if (isPlaying) audioRef.current.pause();
+    else {
+      setIsBuffering(true);
+      audioRef.current.src = playingStation.streamUrl;
+      audioRef.current.play().catch(() => { setIsBuffering(false); });
+    }
   };
+
+  const playStation = (station: RadioStation) => {
+    if (playingStation?.id === station.id) togglePlay();
+    else setPlayingStation(station);
+  };
+
+  const handleVolumeChange = (v: number) => {
+    setVolume(v);
+    if (isMuted && v > 0) setIsMuted(false);
+  };
+
+  const toggleMute = () => {
+    if (isMuted) {
+      setVolume(prevVolumeRef.current);
+      setIsMuted(false);
+    } else {
+      prevVolumeRef.current = volume;
+      setIsMuted(true);
+    }
+  };
+
+  const openChat = () => {
+    setIsChatOpen(true);
+    chatOpenRef.current = true;
+    setUnreadCount(0);
+    lastReadRef.current = Date.now();
+  };
+
+  const closeChat = () => {
+    setIsChatOpen(false);
+    chatOpenRef.current = false;
+    lastReadRef.current = Date.now();
+  };
+
+  // Genres
+  const allGenres = ['All', ...Array.from(new Set(stations.map(s => s.genre))).sort()];
+  const genreEmoji: Record<string, string> = {
+    'All': '📻', 'Hip-Hop': '🎤', 'Rap': '🎤', 'R&B': '🎵', 'Soul': '🎵',
+    'Rock': '🎸', 'Classic Rock': '🎸', 'Country': '🤠', 'Jazz': '🎷',
+    'Classical': '🎻', 'Electronic': '🎹', 'Ambient': '🌊', 'Pop': '🎵',
+    'Blues': '🎺', 'Gospel': '⛪', 'Latin': '🌴', 'Sports': '🏈',
+    'News': '📰', 'Indie': '🎭', 'Folk': '🪕', 'Oldies': '🎃',
+    'Metal': '🤘', 'Reggae': '🌴', 'World': '🌍', 'Lounge': '🍸',
+    'Chill': '❄️', 'Holiday': '🎄', 'Talk': '🎙️', 'Variety': '🎪',
+  };
+
+  // Filter stations
+  const filtered = stations.filter(s => {
+    const q = searchQuery.toLowerCase();
+    const matchSearch = !searchQuery || s.name.toLowerCase().includes(q) || s.genre.toLowerCase().includes(q) || s.city.toLowerCase().includes(q) || s.state.toLowerCase().includes(q);
+    const matchGenre = selectedGenre === 'All' || s.genre === selectedGenre;
+    const matchFav = showFavoritesOnly ? favorites.has(s.id) : true;
+    return matchSearch && matchGenre && matchFav;
+  });
+
+  const visibleStations = filtered.slice(0, showMore);
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex flex-col items-center justify-center gap-4">
-        <img
-          src="https://i.ibb.co/hFrqZrmB/Bugle-Boy-Radio.png"
-          alt="Bugle Boy Radio"
-          className="w-20 h-20 rounded-2xl shadow-lg shadow-amber-500/15 animate-pulse object-contain"
-        />
-        <div className="flex items-center gap-2 text-white/40">
-          <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" strokeDasharray="50 20" strokeLinecap="round" />
-          </svg>
-          <span className="text-sm font-medium">Loading...</span>
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <img src="https://i.ibb.co/hFrqZrmB/Bugle-Boy-Radio.png" alt="Logo" className="w-16 h-16 mx-auto mb-4 rounded-2xl animate-pulse" />
+          <p className="text-white/40 text-sm">Loading Bugle Boy Radio...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white relative overflow-hidden">
-      {/* Background effects */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-amber-500/5 rounded-full blur-[120px]" />
-        <div className="absolute bottom-1/3 left-0 w-[400px] h-[400px] bg-purple-500/5 rounded-full blur-[100px]" />
-        <div className="absolute bottom-0 right-0 w-[500px] h-[300px] bg-blue-500/5 rounded-full blur-[100px]" />
-      </div>
+    <div className={`min-h-screen transition-colors duration-300 ${isDark ? 'bg-gray-950 text-white' : 'bg-gray-50 text-gray-900'}`}>
 
-      {/* Header */}
-      <header className="relative z-10 sticky top-0 bg-[#0a0a0f]/80 backdrop-blur-xl border-b border-white/5">
-        <div className="max-w-6xl mx-auto px-4 pt-4 pb-3">
-          {/* Brand + User */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-4">
-              <div className="flex-shrink-0">
-                <img
-                  src="https://i.ibb.co/hFrqZrmB/Bugle-Boy-Radio.png"
-                  alt="Bugle Boy Radio"
-                  className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl shadow-lg shadow-amber-500/10 object-contain"
-                />
-              </div>
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-black tracking-tight bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent">
-                  Bugle Boy Radio
-                </h1>
-                <p className="text-white/30 text-xs sm:text-sm mt-0.5 flex items-center gap-1.5">
-                  <span className="inline-block w-4 text-center">🇺🇸</span>
-                  <span>{stations.length} USA Stations</span>
-                  <span className="text-white/15">•</span>
-                  <span>All Genres</span>
-                  {user && favorites.size > 0 && (
-                    <>
-                      <span className="text-white/15">•</span>
-                      <span className="text-red-400/60">
-                        ❤️ {favorites.size} saved
-                      </span>
-                    </>
-                  )}
-                </p>
-              </div>
+      {/* HEADER */}
+      <header className={`sticky top-0 z-40 backdrop-blur-xl border-b transition-colors ${isDark ? 'bg-gray-950/90 border-gray-800' : 'bg-white/90 border-gray-200'}`}>
+        <div className="max-w-7xl mx-auto px-4 py-3">
+          <div className="flex items-center gap-3">
+            {/* Logo */}
+            <img src="https://i.ibb.co/hFrqZrmB/Bugle-Boy-Radio.png" alt="Logo" className="w-10 h-10 rounded-xl shadow-lg flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <h1 className="text-lg font-bold bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent leading-tight">Bugle Boy Radio</h1>
+              <p className={`text-[10px] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{stations.length} USA Stations 🇺🇸</p>
             </div>
 
-            {/* User Menu / Sign In Button */}
-            <UserMenu />
+            {/* Theme Toggle */}
+            <button
+              onClick={() => setIsDark(!isDark)}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg transition-all hover:scale-110 active:scale-95 ${isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'}`}
+              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {isDark ? '☀️' : '🌙'}
+            </button>
+
+            {/* Chat Button */}
+            <button
+              onClick={openChat}
+              className={`relative w-10 h-10 rounded-xl flex items-center justify-center text-lg transition-all hover:scale-110 active:scale-95 ${isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'}`}
+              title="Open chat"
+            >
+              💬
+              {/* Online indicator */}
+              {onlineCount > 0 && (
+                <span className="absolute -top-1 -left-1 flex items-center gap-0.5 px-1 py-0.5 rounded-full bg-green-500/20 border border-green-500/30">
+                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                  <span className="text-[8px] text-green-400 font-bold">{onlineCount}</span>
+                </span>
+              )}
+              {/* Unread badge */}
+              {unreadCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-500 rounded-full text-[9px] text-white font-bold flex items-center justify-center px-1 animate-bounce shadow-lg shadow-red-500/40">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {/* User Menu */}
+            <UserMenu isDark={isDark} />
           </div>
 
           {/* Search */}
-          <div className="relative mb-3">
-            <svg
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
+          <div className="mt-3">
             <input
               type="text"
-              placeholder="Search by station, genre, city..."
+              placeholder="🔍 Search stations, genres, cities..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder-white/20 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/20 transition-all"
+              onChange={e => { setSearchQuery(e.target.value); setShowMore(60); }}
+              className={`w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all ${isDark ? 'bg-gray-900 text-white placeholder-gray-600 border border-gray-800 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20' : 'bg-gray-100 text-gray-900 placeholder-gray-400 border border-gray-200 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20'}`}
             />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors"
-              >
-                <svg
-                  className="w-4 h-4"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            )}
           </div>
+        </div>
+      </header>
 
-          {/* Genre filters */}
-          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide -mx-4 px-4">
-            {/* Favorites Button */}
+      {/* GENRE FILTERS */}
+      <div className={`sticky top-[120px] z-30 border-b transition-colors ${isDark ? 'bg-gray-950/95 border-gray-800/50 backdrop-blur-xl' : 'bg-white/95 border-gray-200 backdrop-blur-xl'}`}>
+        <div className="max-w-7xl mx-auto px-4 py-2.5">
+          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+            {/* Favorites filter */}
             <button
               onClick={() => {
-                if (!user) {
-                  setShowAuthModal(true);
-                  return;
-                }
-                setShowFavorites(!showFavorites);
-                if (!showFavorites) setSelectedGenre("All");
+                if (!user) { setShowAuthModal(true); return; }
+                setShowFavoritesOnly(!showFavoritesOnly);
+                setShowMore(60);
               }}
-              className={cn(
-                "px-3 py-1.5 rounded-full text-[11px] font-semibold whitespace-nowrap transition-all duration-200 flex items-center gap-1",
-                showFavorites
-                  ? "bg-gradient-to-r from-red-500 to-pink-500 text-white shadow-lg shadow-red-500/20"
-                  : "bg-white/[0.05] text-white/40 hover:bg-white/[0.08] hover:text-white/60 border border-white/[0.06]"
-              )}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${showFavoritesOnly ? 'bg-red-500 text-white shadow-lg shadow-red-500/25' : isDark ? 'bg-gray-900 text-gray-400 border border-gray-800 hover:border-gray-600' : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-400'}`}
             >
-              <svg
-                className="w-3.5 h-3.5"
-                viewBox="0 0 24 24"
-                fill={
-                  showFavorites || favorites.size > 0
-                    ? "currentColor"
-                    : "none"
-                }
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-              </svg>
-              Favorites ({favorites.size})
+              ❤️ Favorites {favorites.size > 0 && `(${favorites.size})`}
             </button>
 
-            {/* All Button */}
-            <button
-              onClick={() => {
-                setSelectedGenre("All");
-                setShowFavorites(false);
-              }}
-              className={cn(
-                "px-3 py-1.5 rounded-full text-[11px] font-semibold whitespace-nowrap transition-all duration-200",
-                selectedGenre === "All" && !showFavorites
-                  ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-lg shadow-amber-500/20"
-                  : "bg-white/[0.05] text-white/40 hover:bg-white/[0.08] hover:text-white/60 border border-white/[0.06]"
-              )}
-            >
-              🎵 All ({stations.length})
-            </button>
-            {genres.map((genre) => {
-              const count = stations.filter((s) => s.genre === genre).length;
+            {/* Genre filters */}
+            {allGenres.map(g => {
+              const cnt = g === 'All' ? stations.length : stations.filter(s => s.genre === g).length;
               return (
                 <button
-                  key={genre}
-                  onClick={() => {
-                    setSelectedGenre(genre);
-                    setShowFavorites(false);
-                  }}
-                  className={cn(
-                    "px-3 py-1.5 rounded-full text-[11px] font-semibold whitespace-nowrap transition-all duration-200",
-                    selectedGenre === genre && !showFavorites
-                      ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-lg shadow-amber-500/20"
-                      : "bg-white/[0.05] text-white/40 hover:bg-white/[0.08] hover:text-white/60 border border-white/[0.06]"
-                  )}
+                  key={g}
+                  onClick={() => { setSelectedGenre(g); setShowMore(60); setShowFavoritesOnly(false); }}
+                  className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap ${selectedGenre === g && !showFavoritesOnly ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/25' : isDark ? 'bg-gray-900 text-gray-400 border border-gray-800 hover:border-gray-600' : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-400'}`}
                 >
-                  {genreEmoji[genre] || "🎵"} {genre} ({count})
+                  {genreEmoji[g] || '🎵'} {g} ({cnt})
                 </button>
               );
             })}
           </div>
         </div>
-      </header>
+      </div>
 
-      {/* Stations grid */}
-      <main className="relative z-10 px-4 pt-5 pb-32">
-        <div className="max-w-6xl mx-auto">
-          {/* Results info */}
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-white/20 text-xs font-medium">
-              {filteredStations.length} station
-              {filteredStations.length !== 1 ? "s" : ""}
-              {showFavorites && (
-                <span>
-                  {" "}
-                  in <span className="text-red-400/60">Favorites</span>
-                </span>
-              )}
-              {selectedGenre !== "All" && (
-                <span>
-                  {" "}
-                  in{" "}
-                  <span className="text-white/40">{selectedGenre}</span>
-                </span>
-              )}
-              {searchQuery && (
-                <span>
-                  {" "}
-                  matching{" "}
-                  <span className="text-white/40">"{searchQuery}"</span>
-                </span>
-              )}
-            </p>
-            {(selectedGenre !== "All" || searchQuery || showFavorites) && (
-              <button
-                onClick={() => {
-                  setSelectedGenre("All");
-                  setSearchQuery("");
-                  setShowFavorites(false);
-                }}
-                className="text-amber-400/60 text-[11px] hover:text-amber-400 transition-colors"
-              >
-                Clear filters
-              </button>
-            )}
+      {/* STATIONS GRID */}
+      <main className={`max-w-7xl mx-auto px-4 py-4 ${playingStation ? 'pb-32' : 'pb-8'}`}>
+        {/* Favorites empty state */}
+        {showFavoritesOnly && filtered.length === 0 && (
+          <div className="text-center py-20">
+            <p className="text-5xl mb-4">❤️</p>
+            <p className={`text-lg font-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>No favorites yet</p>
+            <p className={`text-sm mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Tap the heart on any station to save it</p>
+            <button onClick={() => setShowFavoritesOnly(false)} className="mt-4 px-6 py-2.5 bg-amber-500 text-black rounded-full text-sm font-semibold hover:bg-amber-400 transition">
+              Browse Stations
+            </button>
           </div>
+        )}
 
-          {filteredStations.length === 0 ? (
-            <div className="text-center py-20">
-              {showFavorites ? (
-                <>
-                  <div className="text-6xl mb-4">❤️</div>
-                  <p className="text-white/40 text-lg font-medium">
-                    No favorites yet
-                  </p>
-                  <p className="text-white/20 text-sm mt-1">
-                    Tap the heart icon on any station to save it
-                  </p>
-                  <button
-                    onClick={() => setShowFavorites(false)}
-                    className="mt-5 px-5 py-2 bg-amber-500/15 text-amber-300 rounded-xl text-sm font-medium hover:bg-amber-500/25 transition-colors"
-                  >
-                    Browse all stations
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="text-6xl mb-4">📻</div>
-                  <p className="text-white/40 text-lg font-medium">
-                    No stations found
-                  </p>
-                  <p className="text-white/20 text-sm mt-1">
-                    Try adjusting your search or genre filter
-                  </p>
-                  <button
-                    onClick={() => {
-                      setSelectedGenre("All");
-                      setSearchQuery("");
-                    }}
-                    className="mt-5 px-5 py-2 bg-amber-500/15 text-amber-300 rounded-xl text-sm font-medium hover:bg-amber-500/25 transition-colors"
-                  >
-                    Show all stations
-                  </button>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {filteredStations.map((station) => (
-                <StationCard
-                  key={station.id}
-                  station={station}
-                  isActive={currentStation?.id === station.id}
-                  isPlaying={
-                    currentStation?.id === station.id && isPlaying
-                  }
-                  isLoading={
-                    currentStation?.id === station.id && isLoading
-                  }
-                  isFavorite={isFavorite(station.id)}
-                  onPlay={playStation}
-                  onToggleFavorite={handleToggleFavorite}
-                />
-              ))}
-            </div>
-          )}
+        {/* No results */}
+        {!showFavoritesOnly && filtered.length === 0 && (
+          <div className="text-center py-20">
+            <p className="text-5xl mb-4">🔍</p>
+            <p className={isDark ? 'text-gray-500' : 'text-gray-400'}>No stations found</p>
+            <button onClick={() => { setSearchQuery(''); setSelectedGenre('All'); }} className="mt-3 text-amber-500 text-sm font-medium hover:underline">
+              Clear filters
+            </button>
+          </div>
+        )}
+
+        {/* Station cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {visibleStations.map(station => (
+            <StationCard
+              key={station.id}
+              station={station}
+              isActive={playingStation?.id === station.id}
+              isPlaying={playingStation?.id === station.id && isPlaying}
+              isLoading={playingStation?.id === station.id && isBuffering}
+              isFavorite={isFavorite(station.id)}
+              isDark={isDark}
+              onPlay={playStation}
+              onToggleFavorite={(id) => {
+                if (!user) { setShowAuthModal(true); return; }
+                toggleFavorite(id);
+              }}
+            />
+          ))}
         </div>
+
+        {/* Load more */}
+        {visibleStations.length < filtered.length && (
+          <div className="text-center py-6">
+            <button
+              onClick={() => setShowMore(p => p + 60)}
+              className="px-8 py-3 bg-amber-500 text-black rounded-xl font-semibold text-sm hover:bg-amber-400 transition shadow-lg shadow-amber-500/20"
+            >
+              Load More ({filtered.length - visibleStations.length} remaining)
+            </button>
+          </div>
+        )}
+
+        {/* Station count */}
+        {filtered.length > 0 && (
+          <div className="text-center pt-4">
+            <p className={`text-xs ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
+              Showing {Math.min(showMore, filtered.length)} of {filtered.length} stations
+            </p>
+          </div>
+        )}
       </main>
 
-      {/* Player Bar */}
-      <PlayerBar
-        station={currentStation}
-        isPlaying={isPlaying}
-        isLoading={isLoading}
-        volume={volume}
-        isMuted={isMuted}
-        isFavorite={currentStation ? isFavorite(currentStation.id) : false}
-        onTogglePlay={togglePlay}
-        onVolumeChange={changeVolume}
-        onToggleMute={toggleMute}
-        onToggleFavorite={() => {
-          if (currentStation) handleToggleFavorite(currentStation.id);
-        }}
+      {/* PLAYER BAR */}
+      <div className="fixed bottom-0 left-0 right-0 z-50">
+        <PlayerBar
+          station={playingStation}
+          isPlaying={isPlaying}
+          isLoading={isBuffering}
+          volume={volume}
+          isMuted={isMuted}
+          isFavorite={playingStation ? isFavorite(playingStation.id) : false}
+          isDark={isDark}
+          onTogglePlay={togglePlay}
+          onVolumeChange={handleVolumeChange}
+          onToggleMute={toggleMute}
+          onToggleFavorite={() => {
+            if (!user) { setShowAuthModal(true); return; }
+            if (playingStation) toggleFavorite(playingStation.id);
+          }}
+        />
+      </div>
+
+      {/* CHAT ROOM */}
+      <ChatRoom
+        isOpen={isChatOpen}
+        onClose={closeChat}
+        isDark={isDark}
+        currentStationName={playingStation?.name}
       />
 
-      {/* Auth Modal */}
+      {/* AUTH MODAL */}
       <AuthModal />
     </div>
   );

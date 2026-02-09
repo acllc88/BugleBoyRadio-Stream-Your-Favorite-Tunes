@@ -24,11 +24,15 @@ import {
 } from "firebase/firestore";
 import { auth, db, googleProvider } from "../firebase";
 
+// Country detection is handled in App.tsx
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   favorites: Set<string>;
   showAuthModal: boolean;
+  userEmoji: string;
+  setUserEmoji: (emoji: string) => void;
   setShowAuthModal: (v: boolean) => void;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
@@ -51,8 +55,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [userEmoji, setUserEmojiState] = useState("");
 
-  // Load favorites from Firestore when user logs in
+  // Load favorites and emoji from Firestore when user logs in
   const loadFavorites = useCallback(async (uid: string) => {
     try {
       const docRef = doc(db, "users", uid);
@@ -61,6 +66,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const data = docSnap.data();
         if (data.favorites && Array.isArray(data.favorites)) {
           setFavorites(new Set(data.favorites));
+        }
+        if (data.emoji && typeof data.emoji === 'string') {
+          setUserEmojiState(data.emoji);
         }
       }
     } catch (err) {
@@ -263,6 +271,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [favorites]
   );
 
+  const setUserEmoji = useCallback(async (emoji: string) => {
+    setUserEmojiState(emoji);
+    if (user) {
+      try {
+        const docRef = doc(db, "users", user.uid);
+        await setDoc(docRef, { emoji }, { merge: true });
+      } catch (err) {
+        console.error("Error saving emoji:", err);
+      }
+    }
+  }, [user]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -270,6 +290,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         favorites,
         showAuthModal,
+        userEmoji,
+        setUserEmoji,
         setShowAuthModal,
         signInWithGoogle,
         signInWithEmail,

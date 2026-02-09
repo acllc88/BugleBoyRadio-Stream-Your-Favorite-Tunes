@@ -296,14 +296,8 @@ export function AuthModal() {
               </p>
             </div>
 
-            {/* Help text for Google sign-in issues */}
-            <div className="mt-4 p-3 bg-white/[0.02] rounded-lg border border-white/[0.05]">
-              <p className="text-white/20 text-[10px] text-center leading-relaxed">
-                🔒 Your data is secured with Firebase Authentication.
-                If Google sign-in doesn't work, use email/password instead,
-                or make sure popups are allowed for this site.
-              </p>
-            </div>
+
+
           </div>
         </div>
       </div>
