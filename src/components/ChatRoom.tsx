@@ -17,6 +17,62 @@ import { db } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { cn } from "../utils/cn";
 
+// Notification sound using Web Audio API
+const playNotificationSound = () => {
+  try {
+    const audioContext = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    
+    // Create oscillator for the "ding" sound
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    // Pleasant notification tone
+    oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5 note
+    oscillator.frequency.setValueAtTime(1100, audioContext.currentTime + 0.1); // Higher note
+    oscillator.type = 'sine';
+    
+    // Fade in and out for smooth sound
+    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.3, audioContext.currentTime + 0.05);
+    gainNode.gain.linearRampToValueAtTime(0.1, audioContext.currentTime + 0.15);
+    gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.3);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.3);
+    
+    console.log("🔔 Notification sound played!");
+  } catch (err) {
+    console.log("Could not play notification sound:", err);
+  }
+};
+
+// Show browser notification
+const showBrowserNotification = (title: string, body: string, onClick?: () => void) => {
+  if ("Notification" in window && Notification.permission === "granted") {
+    try {
+      const notification = new Notification(title, {
+        body,
+        icon: "https://i.ibb.co/hFrqZrmB/Bugle-Boy-Radio.png",
+        tag: "bugle-boy-chat",
+      });
+      
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+        if (onClick) onClick();
+      };
+      
+      // Auto close after 5 seconds
+      setTimeout(() => notification.close(), 5000);
+    } catch (err) {
+      console.log("Notification error:", err);
+    }
+  }
+};
+
 interface ChatMessage {
   id: string;
   text: string;
@@ -185,25 +241,89 @@ export function ChatRoom({ isOpen, onClose, isDark }: ChatRoomProps) {
     return () => unsubscribe();
   }, []);
 
-  // Listen to messages in real-time
-  useEffect(() => {
-    if (!isOpen) return;
+  // Track if this is first load (to prevent notifications on initial load)
+  const isFirstLoadRef = useRef(true);
+  const lastMessageIdRef = useRef<string | null>(null);
+  const [showNotificationBanner, setShowNotificationBanner] = useState(false);
 
+  // Check if we should show notification permission banner
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default" && isOpen) {
+      // Show banner after a short delay
+      const timer = setTimeout(() => setShowNotificationBanner(true), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
+  
+  const handleEnableNotifications = async () => {
+    if ("Notification" in window) {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        setShowNotificationBanner(false);
+        // Play a test sound
+        playNotificationSound();
+      }
+    }
+  };
+
+  // Listen to messages in real-time - ALWAYS listen even when closed for notifications
+  useEffect(() => {
     const messagesRef = collection(db, "chatMessages");
     const q = query(messagesRef, orderBy("createdAt", "desc"), limit(100));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const msgs: ChatMessage[] = [];
-      snapshot.forEach((doc) => {
-        msgs.push({ id: doc.id, ...doc.data() } as ChatMessage);
+      snapshot.forEach((docSnap) => {
+        msgs.push({ id: docSnap.id, ...docSnap.data() } as ChatMessage);
       });
-      setMessages(msgs.reverse());
+      
+      const sortedMsgs = msgs.reverse();
+      
+      // Check for new messages (not from current user)
+      if (!isFirstLoadRef.current && sortedMsgs.length > 0) {
+        const latestMsg = sortedMsgs[sortedMsgs.length - 1];
+        
+        // Only notify if:
+        // 1. It's a new message (different ID)
+        // 2. It's not from the current user
+        // 3. Either chat is closed OR window is not focused
+        if (
+          latestMsg.id !== lastMessageIdRef.current &&
+          latestMsg.userId !== user?.uid
+        ) {
+          console.log("🔔 New message from:", latestMsg.userName);
+          
+          // Play sound notification
+          playNotificationSound();
+          
+          // Show browser notification if permission granted and chat is closed
+          if (!isOpen || document.hidden) {
+            showBrowserNotification(
+              `💬 ${latestMsg.userName}`,
+              latestMsg.text.length > 50 ? latestMsg.text.substring(0, 50) + "..." : latestMsg.text,
+              () => {
+                // This will be handled by App.tsx to open chat
+              }
+            );
+          }
+        }
+        
+        lastMessageIdRef.current = latestMsg.id;
+      }
+      
+      // Mark first load as complete
+      if (isFirstLoadRef.current && sortedMsgs.length > 0) {
+        isFirstLoadRef.current = false;
+        lastMessageIdRef.current = sortedMsgs[sortedMsgs.length - 1]?.id || null;
+      }
+      
+      setMessages(sortedMsgs);
     }, (error) => {
       console.error("Chat listener error:", error);
     });
 
     return () => unsubscribe();
-  }, [isOpen]);
+  }, [user?.uid, isOpen]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -362,6 +482,38 @@ export function ChatRoom({ isOpen, onClose, isDark }: ChatRoomProps) {
               </svg>
             </button>
           </div>
+
+          {/* Notification Permission Banner */}
+          {showNotificationBanner && (
+            <div className={cn(
+              "flex-shrink-0 px-4 py-3 border-b",
+              isDark ? "border-white/5 bg-amber-500/10" : "border-amber-200 bg-amber-50"
+            )}>
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">🔔</span>
+                <div className="flex-1">
+                  <p className={cn("text-xs font-semibold", isDark ? "text-amber-300" : "text-amber-800")}>
+                    Enable notifications
+                  </p>
+                  <p className={cn("text-[10px]", isDark ? "text-amber-300/60" : "text-amber-700")}>
+                    Get notified when new messages arrive
+                  </p>
+                </div>
+                <button
+                  onClick={handleEnableNotifications}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-400 hover:to-orange-400 transition-all"
+                >
+                  Enable
+                </button>
+                <button
+                  onClick={() => setShowNotificationBanner(false)}
+                  className={cn("text-lg", isDark ? "text-white/30 hover:text-white/60" : "text-gray-400 hover:text-gray-600")}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Online Users List (Expandable) */}
           {showOnlineList && (

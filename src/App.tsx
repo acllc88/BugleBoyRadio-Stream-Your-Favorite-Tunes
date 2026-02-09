@@ -6,6 +6,9 @@ import { PlayerBar } from './components/PlayerBar';
 import { AuthModal } from './components/AuthModal';
 import { UserMenu } from './components/UserMenu';
 import { ChatRoom } from './components/ChatRoom';
+import { Footer } from './components/Footer';
+import { PrivacyPolicy } from './components/PrivacyPolicy';
+import { TermsOfService } from './components/TermsOfService';
 import { collection, onSnapshot, query, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -62,6 +65,10 @@ export default function App() {
   const [unreadCount, setUnreadCount] = useState(0);
   const lastReadRef = useRef(Date.now());
   const chatOpenRef = useRef(false);
+
+  // Legal pages
+  const [showPrivacy, setShowPrivacy] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
 
   // Save theme
   useEffect(() => {
@@ -475,6 +482,23 @@ export default function App() {
 
       {/* AUTH MODAL */}
       <AuthModal />
+
+      {/* FOOTER */}
+      <Footer 
+        isDark={isDark} 
+        onShowPrivacy={() => setShowPrivacy(true)}
+        onShowTerms={() => setShowTerms(true)}
+      />
+
+      {/* PRIVACY POLICY MODAL */}
+      {showPrivacy && (
+        <PrivacyPolicy isDark={isDark} onClose={() => setShowPrivacy(false)} />
+      )}
+
+      {/* TERMS OF SERVICE MODAL */}
+      {showTerms && (
+        <TermsOfService isDark={isDark} onClose={() => setShowTerms(false)} />
+      )}
     </div>
   );
 }
