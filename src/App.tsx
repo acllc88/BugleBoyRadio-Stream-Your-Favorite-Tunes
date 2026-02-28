@@ -9,6 +9,9 @@ import { ChatRoom } from './components/ChatRoom';
 import { Footer } from './components/Footer';
 import { PrivacyPolicy } from './components/PrivacyPolicy';
 import { TermsOfService } from './components/TermsOfService';
+import AdminLogin from './components/AdminLogin';
+import AdminDashboard from './components/AdminDashboard';
+import MaintenanceScreen from './components/MaintenanceScreen';
 import { collection, onSnapshot, query, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -44,6 +47,29 @@ export default function App() {
     return saved ? saved === 'dark' : true;
   });
 
+  // Admin mode
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
+    const auth = sessionStorage.getItem('adminAuth');
+    const loginTime = sessionStorage.getItem('adminLoginTime');
+    // Session expires after 2 hours
+    if (auth === 'true' && loginTime) {
+      const elapsed = Date.now() - parseInt(loginTime);
+      return elapsed < 2 * 60 * 60 * 1000;
+    }
+    return false;
+  });
+
+  // Maintenance mode - from Firebase
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState('');
+  const [maintenanceEndTime, setMaintenanceEndTime] = useState('');
+
+  // Announcements - from Firebase
+  const [announcement, setAnnouncement] = useState('');
+  const [announcementEnabled, setAnnouncementEnabled] = useState(false);
+  const [showAnnouncementBanner, setShowAnnouncementBanner] = useState(true);
+
   // Search & filters
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('All');
@@ -70,6 +96,64 @@ export default function App() {
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
 
+  // Secret admin access - click logo 5 times
+  const logoClickCount = useRef(0);
+  const logoClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleLogoClick = () => {
+    logoClickCount.current += 1;
+    
+    if (logoClickTimer.current) clearTimeout(logoClickTimer.current);
+    
+    logoClickTimer.current = setTimeout(() => {
+      logoClickCount.current = 0;
+    }, 2000);
+
+    if (logoClickCount.current >= 5) {
+      logoClickCount.current = 0;
+      setShowAdminLogin(true);
+    }
+  };
+
+  // Listen to settings from Firebase (maintenance mode, announcements) - REAL TIME
+  useEffect(() => {
+    console.log('🔄 Setting up real-time settings listener...');
+    const settingsRef = doc(db, 'settings', 'general');
+    
+    const unsub = onSnapshot(settingsRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        console.log('📡 Settings updated from Firebase:', data);
+        
+        // Update maintenance mode
+        setMaintenanceMode(data.maintenanceMode === true);
+        setMaintenanceMessage(data.maintenanceMessage || '');
+        setMaintenanceEndTime(data.maintenanceEndTime || '');
+        
+        // Update announcements
+        setAnnouncement(data.announcement || '');
+        setAnnouncementEnabled(data.announcementEnabled === true);
+        
+        // Log what changed
+        if (data.maintenanceMode) {
+          console.log('🔴 MAINTENANCE MODE ACTIVE');
+        } else {
+          console.log('🟢 APP IS LIVE');
+        }
+        
+        if (data.announcementEnabled && data.announcement) {
+          console.log('📢 Announcement:', data.announcement);
+        }
+      } else {
+        console.log('⚠️ No settings document found in Firebase');
+      }
+    }, (error) => {
+      console.error('❌ Error listening to settings:', error);
+    });
+    
+    return () => unsub();
+  }, []);
+
   // Save theme
   useEffect(() => {
     localStorage.setItem('bugleboy-theme', isDark ? 'dark' : 'light');
@@ -94,47 +178,36 @@ export default function App() {
           countryName: countryData.name,
           countryFlag: countryData.flag,
         });
-        console.log('✅ User online:', user.displayName, countryData.flag);
       } catch (e) {
         console.error('Error setting online:', e);
       }
     };
 
-    // Get country then set online
     getUserCountry().then(country => {
       userCountry = country;
       setOnline(country);
     });
 
-    const heartbeat = setInterval(() => setOnline(), 10000); // Update every 10 seconds
+    const heartbeat = setInterval(() => setOnline(), 10000);
 
-    // Cleanup stale users (older than 30 seconds)
     const cleanupStale = async () => {
       try {
         const snap = await getDocs(collection(db, 'onlineUsers'));
         const now = Date.now();
         const THIRTY_SECONDS = 30 * 1000;
-        let cleaned = 0;
         for (const d of snap.docs) {
           const ls = d.data().lastSeen;
           if (typeof ls === 'number' && now - ls > THIRTY_SECONDS) {
-            try { 
-              await deleteDoc(doc(db, 'onlineUsers', d.id)); 
-              cleaned++;
-            } catch { /* ignore */ }
+            try { await deleteDoc(doc(db, 'onlineUsers', d.id)); } catch { /* ignore */ }
           }
         }
-        if (cleaned > 0) console.log('🧹 Cleaned', cleaned, 'stale users');
       } catch { /* ignore */ }
     };
     cleanupStale();
     const cleanupInterval = setInterval(cleanupStale, 15000);
 
     const goOffline = async () => {
-      try { 
-        await deleteDoc(userDocRef); 
-        console.log('👋 User offline');
-      } catch { /* ignore */ }
+      try { await deleteDoc(userDocRef); } catch { /* ignore */ }
     };
 
     window.addEventListener('beforeunload', goOffline);
@@ -149,7 +222,7 @@ export default function App() {
     };
   }, [user]);
 
-  // Online count listener - real-time from Firebase
+  // Online count listener
   useEffect(() => {
     const onlineRef = collection(db, 'onlineUsers');
     const unsub = onSnapshot(onlineRef, (snap) => {
@@ -161,11 +234,7 @@ export default function App() {
         return typeof lastSeen === 'number' && (now - lastSeen) < THIRTY_SECONDS;
       });
       setOnlineCount(activeUsers.length);
-      console.log('👥 Online count:', activeUsers.length);
-    }, (error) => {
-      console.error('Online count error:', error);
-      setOnlineCount(0);
-    });
+    }, () => setOnlineCount(0));
     return () => unsub();
   }, []);
 
@@ -279,6 +348,7 @@ export default function App() {
 
   const visibleStations = filtered.slice(0, showMore);
 
+  // Loading state
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
@@ -290,15 +360,73 @@ export default function App() {
     );
   }
 
+  // Admin Login Page
+  if (showAdminLogin && !isAdminLoggedIn) {
+    return (
+      <AdminLogin
+        isDark={isDark}
+        onLogin={(success) => {
+          if (success) {
+            setIsAdminLoggedIn(true);
+            setShowAdminLogin(false);
+          }
+        }}
+        onBack={() => setShowAdminLogin(false)}
+      />
+    );
+  }
+
+  // Admin Dashboard
+  if (isAdminLoggedIn) {
+    return (
+      <AdminDashboard
+        isDark={isDark}
+        onLogout={() => {
+          setIsAdminLoggedIn(false);
+          sessionStorage.removeItem('adminAuth');
+          sessionStorage.removeItem('adminLoginTime');
+        }}
+      />
+    );
+  }
+
+  // Maintenance Screen (for regular users, admins can bypass)
+  if (maintenanceMode && !isAdminLoggedIn) {
+    return (
+      <MaintenanceScreen
+        message={maintenanceMessage}
+        endTime={maintenanceEndTime}
+      />
+    );
+  }
+
   return (
     <div className={`min-h-screen transition-colors duration-300 ${isDark ? 'bg-gray-950 text-white' : 'bg-gray-50 text-gray-900'}`}>
+
+      {/* ANNOUNCEMENT BANNER */}
+      {announcementEnabled && announcement && showAnnouncementBanner && (
+        <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-black px-4 py-2 text-center text-sm font-medium relative">
+          <span>{announcement}</span>
+          <button 
+            onClick={() => setShowAnnouncementBanner(false)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-black/60 hover:text-black text-lg"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* HEADER */}
       <header className={`sticky top-0 z-40 backdrop-blur-xl border-b transition-colors ${isDark ? 'bg-gray-950/90 border-gray-800' : 'bg-white/90 border-gray-200'}`}>
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center gap-3">
-            {/* Logo */}
-            <img src="https://i.ibb.co/hFrqZrmB/Bugle-Boy-Radio.png" alt="Logo" className="w-10 h-10 rounded-xl shadow-lg flex-shrink-0" />
+            {/* Logo - click 5 times for admin */}
+            <img 
+              src="https://i.ibb.co/hFrqZrmB/Bugle-Boy-Radio.png" 
+              alt="Logo" 
+              className="w-10 h-10 rounded-xl shadow-lg flex-shrink-0 cursor-pointer"
+              onClick={handleLogoClick}
+            />
             <div className="flex-1 min-w-0">
               <h1 className="text-lg font-bold bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent leading-tight">Bugle Boy Radio</h1>
               <p className={`text-[10px] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{stations.length} USA Stations 🇺🇸</p>
@@ -320,14 +448,12 @@ export default function App() {
               title="Open chat"
             >
               💬
-              {/* Online indicator */}
               {onlineCount > 0 && (
                 <span className="absolute -top-1 -left-1 flex items-center gap-0.5 px-1 py-0.5 rounded-full bg-green-500/20 border border-green-500/30">
                   <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
                   <span className="text-[8px] text-green-400 font-bold">{onlineCount}</span>
                 </span>
               )}
-              {/* Unread badge */}
               {unreadCount > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-500 rounded-full text-[9px] text-white font-bold flex items-center justify-center px-1 animate-bounce shadow-lg shadow-red-500/40">
                   {unreadCount > 99 ? '99+' : unreadCount}
@@ -356,7 +482,6 @@ export default function App() {
       <div className={`sticky top-[120px] z-30 border-b transition-colors ${isDark ? 'bg-gray-950/95 border-gray-800/50 backdrop-blur-xl' : 'bg-white/95 border-gray-200 backdrop-blur-xl'}`}>
         <div className="max-w-7xl mx-auto px-4 py-2.5">
           <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-            {/* Favorites filter */}
             <button
               onClick={() => {
                 if (!user) { setShowAuthModal(true); return; }
@@ -368,7 +493,6 @@ export default function App() {
               ❤️ Favorites {favorites.size > 0 && `(${favorites.size})`}
             </button>
 
-            {/* Genre filters */}
             {allGenres.map(g => {
               const cnt = g === 'All' ? stations.length : stations.filter(s => s.genre === g).length;
               return (
@@ -387,7 +511,6 @@ export default function App() {
 
       {/* STATIONS GRID */}
       <main className={`max-w-7xl mx-auto px-4 py-4 ${playingStation ? 'pb-32' : 'pb-8'}`}>
-        {/* Favorites empty state */}
         {showFavoritesOnly && filtered.length === 0 && (
           <div className="text-center py-20">
             <p className="text-5xl mb-4">❤️</p>
@@ -399,7 +522,6 @@ export default function App() {
           </div>
         )}
 
-        {/* No results */}
         {!showFavoritesOnly && filtered.length === 0 && (
           <div className="text-center py-20">
             <p className="text-5xl mb-4">🔍</p>
@@ -410,7 +532,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Station cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {visibleStations.map(station => (
             <StationCard
@@ -430,7 +551,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* Load more */}
         {visibleStations.length < filtered.length && (
           <div className="text-center py-6">
             <button
@@ -442,7 +562,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Station count */}
         {filtered.length > 0 && (
           <div className="text-center pt-4">
             <p className={`text-xs ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
